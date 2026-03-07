@@ -59,7 +59,7 @@ async def to_code(config):
         var = cg.new_Pvariable(conf[CONF_ID])
 
         sun_component = await cg.get_variable(conf[CONF_SUN_ID])
-        light_component = await await cg.get_variable(conf[CONF_LIGHT_ID])
+        light_component = await cg.get_variable(conf[CONF_LIGHT_ID])
 
         if CONF_COLD_WHITE_COLOR_TEMPERATURE in conf:
             cg.add(var.set_cold_white_temperature(conf[CONF_COLD_WHITE_COLOR_TEMPERATURE]))

@@ -81,6 +81,7 @@ protected:
   
   float last_brightness_{-1.0f}; 
   bool brightness_manually_controlled_{false};
+  bool color_manually_controlled_{false}; // <-- Add this new flag
   bool last_light_state_{false};
 
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 12, 0)

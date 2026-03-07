@@ -155,11 +155,21 @@ void AdaptiveLightingComponent::update() {
 
   ESP_LOGD(TAG, "Setting color temperature %.3f and brightness %.2f", mireds, new_brightness);
   auto call = light_->make_call();
-  call.set_color_temperature(mireds);
   
-  // Apply calculated brightness
-  call.set_brightness(new_brightness);
+  // Only apply color if it wasn't manually overridden
+  if (!this->color_manually_controlled_) {
+      if (mireds < light_min_mireds_) {
+        mireds = light_min_mireds_;
+      } else if (mireds > light_max_mireds_) {
+        mireds = light_max_mireds_;
+      }
+      call.set_color_temperature(mireds);
+      last_requested_color_temp_ = mireds;
+  }
+  
+  // Only apply brightness if enabled and not overridden
   if (apply_brightness && !this->brightness_manually_controlled_) {
+      call.set_brightness(new_brightness);
       this->last_brightness_ = new_brightness;
   }
 
@@ -189,40 +199,33 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
 
   bool current_state = light_->remote_values.is_on();
 
-  // Light is on
   if (current_state) {
     float current_temp = light_->remote_values.get_color_temperature();
     float current_brightness = light_->remote_values.get_brightness();
 
-    // Check if color temperature changed externally
-    if (this->state && last_requested_color_temp_ > 0 && std::fabs(current_temp - last_requested_color_temp_) > 0.1) {
-      ESP_LOGI(
-          TAG,
-          "Color temperature changed externally (current: %.3f, last requested: %.3f), disabling adaptive lighting",
-          current_temp, last_requested_color_temp_);
-      this->write_state(false);
+    // Check if color changed externally
+    if (this->state && !this->color_manually_controlled_ && last_requested_color_temp_ > 0 && std::fabs(current_temp - last_requested_color_temp_) > 0.1) {
+      ESP_LOGI(TAG, "Color temperature changed externally, pausing adaptive color");
+      this->color_manually_controlled_ = true; // Temporary pause instead of turning switch OFF
     }
 
     // Check if brightness changed externally
-    if (this->state && this->last_brightness_ >= 0.0f && std::fabs(current_brightness - this->last_brightness_) > 0.01f) {
-      ESP_LOGI(
-          TAG,
-          "Brightness changed externally (current: %.3f, last requested: %.3f), pausing adaptive brightness",
-          current_brightness, this->last_brightness_);
+    if (this->state && !this->brightness_manually_controlled_ && this->last_brightness_ >= 0.0f && std::fabs(current_brightness - this->last_brightness_) > 0.01f) {
+      ESP_LOGI(TAG, "Brightness changed externally, pausing adaptive brightness");
       this->brightness_manually_controlled_ = true;
-      this->last_brightness_ = current_brightness; // Update to prevent re-triggering
+      this->last_brightness_ = current_brightness;
     }
   }
-  // Light was just turned off
   else if (previous_light_state_ && !this->state && this->restore_mode == switch_::SWITCH_ALWAYS_ON) {
-    // Enable adaptive lightning when light turns back on if restore mode is ALWAYS_ON
     this->write_state(true);
   }
 
-  // Reset manual brightness control when light turns off
+  // Reset ALL manual controls when the light is turned off!
   if (!current_state && previous_light_state_) {
       this->brightness_manually_controlled_ = false;
-      this->last_brightness_ = -1.0f; // Force recalculation next turn-on
+      this->color_manually_controlled_ = false;
+      this->last_brightness_ = -1.0f; 
+      this->last_requested_color_temp_ = 0;
   }
 
   previous_light_state_ = current_state;

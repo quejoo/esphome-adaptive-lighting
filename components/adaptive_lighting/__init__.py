@@ -52,9 +52,9 @@ async def to_code(config):
     cg.add(var.set_light(light_state))
 
     if CONF_COLD_WHITE_COLOR_TEMPERATURE in config:
-        cg.add(var.set_cold_white_color_temperature(config[CONF_COLD_WHITE_COLOR_TEMPERATURE]))
+        cg.add(var.set_cold_white_temperature(config[CONF_COLD_WHITE_COLOR_TEMPERATURE]))
     if CONF_WARM_WHITE_COLOR_TEMPERATURE in config:
-        cg.add(var.set_warm_white_color_temperature(config[CONF_WARM_WHITE_COLOR_TEMPERATURE]))
+        cg.add(var.set_warm_white_temperature(config[CONF_WARM_WHITE_COLOR_TEMPERATURE]))
     if CONF_SUNRISE_ELEVATION in config:
         cg.add(var.set_sunrise_elevation(config[CONF_SUNRISE_ELEVATION]))
     if CONF_SUNSET_ELEVATION in config:

@@ -39,7 +39,7 @@ adaptive_lighting:
 
 ```yaml
 external_components:
-  - source: github://mdvorak/esphome-adaptive-lighting@v1
+  - source: https://github.com/quejoo/esphome-adaptive-lighting
 
 adaptive_lighting:
   - light_id: cw_light

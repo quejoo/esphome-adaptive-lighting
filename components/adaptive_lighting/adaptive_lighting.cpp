@@ -33,12 +33,10 @@ AdaptiveLightingComponent::~AdaptiveLightingComponent() {
 
 void AdaptiveLightingComponent::setup() {
   if (light_ != nullptr) {
-    // Initialize min/max mireds for the light
     auto traits = light_->get_traits();
     light_min_mireds_ = traits.get_min_mireds();
     light_max_mireds_ = traits.get_max_mireds();
 
-    // Inherit min/max mireds from light if not set
     if (min_mireds_ <= 0) {
       min_mireds_ = light_min_mireds_;
     }
@@ -46,7 +44,6 @@ void AdaptiveLightingComponent::setup() {
       max_mireds_ = light_max_mireds_;
     }
 
-    // Initialize listener
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 12, 0)
     listener_ = new AdaptiveLightingListenerAdapter(this);
     light_->add_remote_values_listener(listener_);
@@ -58,7 +55,6 @@ void AdaptiveLightingComponent::setup() {
     this->publish_state(true);
   }
 
-  // Register callback for time synchronization events
   if (sun_ != nullptr) {
     auto *time = sun_->get_time();
     if (time != nullptr) {
@@ -71,9 +67,7 @@ void AdaptiveLightingComponent::setup() {
   }
 }
 
-// x in [0, 1]
 static float smooth_transition(float x, float y_min, float y_max, float speed = 1) {
-  // This influences transition curve and speed
   constexpr double y1 = 0.00001;
   constexpr double y2 = 0.999;
   static float a = (std::atanh(2 * y2 - 1) - std::atanh(2 * y1 - 1));
@@ -93,28 +87,25 @@ void AdaptiveLightingComponent::update() {
     return;
   }
 
-  // Calculate sun events
   const auto now = sun_->get_time()->now();
   SunEvents sun_events = calc_sun_events(now);
 
   if (!sun_events.sunrise || !sun_events.sunset) {
-    ESP_LOGW(TAG, "Could not determine sunrise or sunset (%d %d)", !!sun_events.sunrise, !!sun_events.sunset);
+    ESP_LOGW(TAG, "Could not determine sunrise or sunset");
     return;
   }
 
-  // Calculate Color Temp
   const time_t sunrise_time = sun_events.sunrise->timestamp;
   const time_t sunset_time = sun_events.sunset->timestamp;
   float mireds = calc_color_temperature(now.timestamp, sunrise_time, sunset_time);
-  bool color_needs_update = (std::fabs(mireds - last_requested_color_temp_) >= 0.1);
+  bool color_needs_update = (!this->color_manually_controlled_ && std::fabs(mireds - last_requested_color_temp_) >= 0.1);
 
-  // --- ADAPTIVE BRIGHTNESS CALCULATION ---
   bool apply_brightness = true;
   if (this->adaptive_brightness_switch_ != nullptr && !this->adaptive_brightness_switch_->state) {
       apply_brightness = false;
   }
 
-  float new_brightness = light_->remote_values.get_brightness(); // Default to current
+  float new_brightness = light_->remote_values.get_brightness(); 
   bool brightness_needs_update = false;
 
   if (apply_brightness && !this->brightness_manually_controlled_ && 
@@ -124,13 +115,11 @@ void AdaptiveLightingComponent::update() {
       float max_b = this->max_brightness_->state / 100.0f;
 
       if (now.timestamp < sunrise_time || now.timestamp > sunset_time) {
-          new_brightness = min_b; // Night time
+          new_brightness = min_b; 
       } else {
           float position = float(now.timestamp - sunrise_time) / float(sunset_time - sunrise_time);
-          // Invert the curve: brightest at noon, dimmest at sunrise/sunset
           new_brightness = smooth_transition(position, max_b, min_b);
       }
-      // Round to 2 decimal places to prevent micro-fluctuations
       new_brightness = std::roundf(new_brightness * 100.0f) / 100.0f;
 
       if (this->last_brightness_ < 0.0f || std::fabs(new_brightness - this->last_brightness_) >= 0.01f) {
@@ -139,24 +128,11 @@ void AdaptiveLightingComponent::update() {
   }
 
   if (!color_needs_update && !brightness_needs_update) {
-    // This is mandatory to avoid infinite loops when the light is updated
-    ESP_LOGD(TAG, "Skipping update, color temperature and brightness are the same as last requested");
     return;
   }
 
-  last_requested_color_temp_ = mireds;
-
-  // Normalize to avoid warnings
-  if (mireds < light_min_mireds_) {
-    mireds = light_min_mireds_;
-  } else if (mireds > light_max_mireds_) {
-    mireds = light_max_mireds_;
-  }
-
-  ESP_LOGD(TAG, "Setting color temperature %.3f and brightness %.2f", mireds, new_brightness);
   auto call = light_->make_call();
-  
-  // Only apply color if it wasn't manually overridden
+
   if (!this->color_manually_controlled_) {
       if (mireds < light_min_mireds_) {
         mireds = light_min_mireds_;
@@ -166,8 +142,7 @@ void AdaptiveLightingComponent::update() {
       call.set_color_temperature(mireds);
       last_requested_color_temp_ = mireds;
   }
-  
-  // Only apply brightness if enabled and not overridden
+
   if (apply_brightness && !this->brightness_manually_controlled_) {
       call.set_brightness(new_brightness);
       this->last_brightness_ = new_brightness;
@@ -176,17 +151,12 @@ void AdaptiveLightingComponent::update() {
   if (transition_length_ > 0 && light_->remote_values.is_on()) {
     call.set_transition_length_if_supported(transition_length_);
   }
+  
   call.perform();
 }
 
 void AdaptiveLightingComponent::write_state(bool state) {
   if (this->state != state) {
-    if (state) {
-      ESP_LOGD(TAG, "Adaptive lighting enabled");
-    } else {
-      ESP_LOGD(TAG, "Adaptive lighting disabled");
-    }
-
     this->force_next_update();
     this->publish_state(state);
     this->update();
@@ -203,13 +173,11 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
     float current_temp = light_->remote_values.get_color_temperature();
     float current_brightness = light_->remote_values.get_brightness();
 
-    // Check if color changed externally
     if (this->state && !this->color_manually_controlled_ && last_requested_color_temp_ > 0 && std::fabs(current_temp - last_requested_color_temp_) > 0.1) {
       ESP_LOGI(TAG, "Color temperature changed externally, pausing adaptive color");
-      this->color_manually_controlled_ = true; // Temporary pause instead of turning switch OFF
+      this->color_manually_controlled_ = true;
     }
 
-    // Check if brightness changed externally
     if (this->state && !this->brightness_manually_controlled_ && this->last_brightness_ >= 0.0f && std::fabs(current_brightness - this->last_brightness_) > 0.01f) {
       ESP_LOGI(TAG, "Brightness changed externally, pausing adaptive brightness");
       this->brightness_manually_controlled_ = true;
@@ -220,7 +188,6 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
     this->write_state(true);
   }
 
-  // Reset ALL manual controls when the light is turned off!
   if (!current_state && previous_light_state_) {
       this->brightness_manually_controlled_ = false;
       this->color_manually_controlled_ = false;
@@ -232,16 +199,13 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
 }
 
 SunEvents AdaptiveLightingComponent::calc_sun_events(const ESPTime &now) {
-  // Calculate start of day, to get today's events, not next events
   ESPTime today = now;
   today.hour = today.minute = today.second = 0;
   today.recalc_timestamp_local();
 
-  // Note Sun class does not expose any useful methods to get maximum and minimum elevation
   float sunrise_elevation = sunrise_elevation_;
   optional<ESPTime> sunrise = sun_->sunrise(today, sunrise_elevation);
 
-  // Adjust sunrise elevation to find valid sunrise time
   while (!sunrise && sunrise_elevation < 0.0f) {
     sunrise_elevation += ELEVATION_ADJUSTMENT_STEP;
     sunrise = sun_->sunrise(today, sunrise_elevation);
@@ -254,7 +218,6 @@ SunEvents AdaptiveLightingComponent::calc_sun_events(const ESPTime &now) {
   float sunset_elevation = sunset_elevation_;
   optional<ESPTime> sunset = sun_->sunset(today, sunset_elevation);
 
-  // Adjust sunset elevation to find valid sunset time
   while (!sunset && sunset_elevation < 0.0f) {
     sunset_elevation += ELEVATION_ADJUSTMENT_STEP;
     sunset = sun_->sunset(today, sunset_elevation);
@@ -274,52 +237,28 @@ float AdaptiveLightingComponent::calc_color_temperature(const time_t now, const 
   } else {
     float position = float(now - sunrise) / float(sunset - sunrise);
     float mireds = smooth_transition(position, min_mireds, max_mireds, speed);
-    // Round to one decimal place
     return std::roundf(mireds * 10) / 10;
   }
 }
 
 void AdaptiveLightingComponent::dump_config() {
   if (light_ == nullptr || sun_ == nullptr) {
-    ESP_LOGW(TAG, "Light or Sun component not set!");
     return;
   }
 
-  ESP_LOGCONFIG(TAG, "sunrise_elevation: %.3f", sunrise_elevation_);
-  ESP_LOGCONFIG(TAG, "sunset_elevation: %.3f", sunset_elevation_);
-
-  // Calculate sun events
   const auto now = sun_->get_time()->now();
   SunEvents sun_events = calc_sun_events(now);
 
-  ESP_LOGCONFIG(TAG, "Adaptive Lighting %s", ADAPTIVE_LIGHTING_VERSION);
-  ESP_LOGCONFIG(TAG, "Today: %s", sun_events.today.strftime("%x %X").c_str());
-
   if (!sun_events.sunrise || !sun_events.sunset) {
-    ESP_LOGW(TAG, "Could not determine sunrise or sunset (%d %d)", !!sun_events.sunrise, !!sun_events.sunset);
-    ESP_LOGW(TAG, "Today: %s", sun_events.today.strftime("%x %X").c_str());
     return;
   }
-
-  ESP_LOGCONFIG(TAG, "Sunrise: %s", sun_events.sunrise->strftime("%x %X").c_str());
-  ESP_LOGCONFIG(TAG, "Sunset: %s", sun_events.sunset->strftime("%x %X").c_str());
-  ESP_LOGCONFIG(TAG, "Sun elevation: %.3f", sun_->elevation());
-  ESP_LOGCONFIG(TAG, "Configured sunrise elevation: %.3f, sunset elevation: %.3f", sunrise_elevation_,
-                sunset_elevation_);
-  ESP_LOGCONFIG(TAG, "Adjusted   sunrise elevation: %.3f, sunset elevation: %.3f", sun_events.sunrise_elevation,
-                sun_events.sunset_elevation);
-  ESP_LOGCONFIG(TAG, "Color temperature range: %.3f - %.3f", min_mireds_, max_mireds_);
-  ESP_LOGCONFIG(TAG, "Transition length: %d", transition_length_);
 
   for (int i = 0; i < 24; i++) {
     auto time = sun_events.today;
     time.hour = i;
     time.recalc_timestamp_local();
     float mireds = calc_color_temperature(time.timestamp, sun_events.sunrise->timestamp, sun_events.sunset->timestamp);
-    ESP_LOGCONFIG(TAG, "Time: %s, Color temperature: %.3f", time.strftime("%x %X").c_str(), mireds);
   }
-
-  ESP_LOGCONFIG(TAG, "State: %s", this->state ? "enabled" : "disabled");
 }
 
 } // namespace esphome::adaptive_lighting

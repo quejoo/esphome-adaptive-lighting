@@ -95,9 +95,29 @@ void AdaptiveLightingComponent::update() {
     return;
   }
 
+  bool is_sleep_mode = (this->sleep_switch_ != nullptr && this->sleep_switch_->state);
+  
+  if (is_sleep_mode != this->last_sleep_state_) {
+      this->color_manually_controlled_ = false;
+      this->brightness_manually_controlled_ = false;
+      this->last_sleep_state_ = is_sleep_mode;
+  }
+
   const time_t sunrise_time = sun_events.sunrise->timestamp;
   const time_t sunset_time = sun_events.sunset->timestamp;
-  float mireds = calc_color_temperature(now.timestamp, sunrise_time, sunset_time);
+  
+  float mireds;
+  if (is_sleep_mode) {
+      // --- CHANGED: Read slider in Kelvin, convert to Mireds ---
+      if (this->sleep_color_temperature_ != nullptr && this->sleep_color_temperature_->state > 0) {
+          mireds = 1000000.0f / this->sleep_color_temperature_->state;
+      } else {
+          mireds = light_max_mireds_;
+      }
+  } else {
+      mireds = calc_color_temperature(now.timestamp, sunrise_time, sunset_time);
+  }
+
   bool color_needs_update = (!this->color_manually_controlled_ && std::fabs(mireds - last_requested_color_temp_) >= 0.1);
 
   bool apply_brightness = true;
@@ -108,18 +128,22 @@ void AdaptiveLightingComponent::update() {
   float new_brightness = light_->remote_values.get_brightness(); 
   bool brightness_needs_update = false;
 
-  if (apply_brightness && !this->brightness_manually_controlled_ && 
-      this->min_brightness_ != nullptr && this->max_brightness_ != nullptr) {
+  if (apply_brightness && !this->brightness_manually_controlled_) {
+      if (is_sleep_mode) {
+          // --- CHANGED: Read slider percentage ---
+          new_brightness = (this->sleep_brightness_ != nullptr) ? (this->sleep_brightness_->state / 100.0f) : 0.01f;
+      } else if (this->min_brightness_ != nullptr && this->max_brightness_ != nullptr) {
+          float min_b = this->min_brightness_->state / 100.0f;
+          float max_b = this->max_brightness_->state / 100.0f;
 
-      float min_b = this->min_brightness_->state / 100.0f;
-      float max_b = this->max_brightness_->state / 100.0f;
-
-      if (now.timestamp < sunrise_time || now.timestamp > sunset_time) {
-          new_brightness = min_b; 
-      } else {
-          float position = float(now.timestamp - sunrise_time) / float(sunset_time - sunrise_time);
-          new_brightness = smooth_transition(position, max_b, min_b);
+          if (now.timestamp < sunrise_time || now.timestamp > sunset_time) {
+              new_brightness = min_b; 
+          } else {
+              float position = float(now.timestamp - sunrise_time) / float(sunset_time - sunrise_time);
+              new_brightness = smooth_transition(position, max_b, min_b);
+          }
       }
+
       new_brightness = std::roundf(new_brightness * 100.0f) / 100.0f;
 
       if (this->last_brightness_ < 0.0f || std::fabs(new_brightness - this->last_brightness_) >= 0.01f) {

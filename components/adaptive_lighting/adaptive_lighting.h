@@ -39,6 +39,12 @@ public:
   void set_max_brightness(number::Number *max_brightness) { max_brightness_ = max_brightness; }
   void set_adaptive_brightness_switch(switch_::Switch *adaptive_brightness_switch) { adaptive_brightness_switch_ = adaptive_brightness_switch; }
 
+  void set_sleep_switch(switch_::Switch *sleep_switch) { sleep_switch_ = sleep_switch; }
+  
+  // --- CHANGED: Now taking pointers to the Number components ---
+  void set_sleep_brightness(number::Number *sleep_brightness) { sleep_brightness_ = sleep_brightness; }
+  void set_sleep_color_temperature(number::Number *sleep_color_temperature) { sleep_color_temperature_ = sleep_color_temperature; }
+
   void update() override;
 
   void write_state(bool state) override;
@@ -77,6 +83,13 @@ protected:
   number::Number *max_brightness_{nullptr};
   switch_::Switch *adaptive_brightness_switch_{nullptr};
   
+  switch_::Switch *sleep_switch_{nullptr};
+  
+  // --- CHANGED: Pointers for dynamic tracking ---
+  number::Number *sleep_brightness_{nullptr};
+  number::Number *sleep_color_temperature_{nullptr};
+  bool last_sleep_state_{false};
+
   float last_brightness_{-1.0f}; 
   bool brightness_manually_controlled_{false};
   bool color_manually_controlled_{false};

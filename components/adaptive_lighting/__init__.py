@@ -21,6 +21,10 @@ CONF_MIN_BRIGHTNESS = "min_brightness"
 CONF_MAX_BRIGHTNESS = "max_brightness"
 CONF_ADAPTIVE_BRIGHTNESS_SWITCH = "adaptive_brightness_switch"
 
+CONF_SLEEP_SWITCH = "sleep_switch"
+CONF_SLEEP_BRIGHTNESS = "sleep_brightness"
+CONF_SLEEP_COLOR_TEMPERATURE = "sleep_color_temperature"
+
 adaptive_lighting_ns = cg.esphome_ns.namespace('adaptive_lighting')
 AdaptiveLightingComponent = adaptive_lighting_ns.class_(
     'AdaptiveLightingComponent',
@@ -42,6 +46,10 @@ ADAPTIVE_LIGHTING_SCHEMA = cv.polling_component_schema("60s").extend(
     cv.Optional(CONF_MIN_BRIGHTNESS): cv.use_id(number.Number),
     cv.Optional(CONF_MAX_BRIGHTNESS): cv.use_id(number.Number),
     cv.Optional(CONF_ADAPTIVE_BRIGHTNESS_SWITCH): cv.use_id(switch.Switch),
+    # --- CHANGED: Now expects IDs pointing to your sliders ---
+    cv.Optional(CONF_SLEEP_SWITCH): cv.use_id(switch.Switch),
+    cv.Optional(CONF_SLEEP_BRIGHTNESS): cv.use_id(number.Number),
+    cv.Optional(CONF_SLEEP_COLOR_TEMPERATURE): cv.use_id(number.Number),
 }))
 
 CONFIG_SCHEMA = cv.All(cv.ensure_list(ADAPTIVE_LIGHTING_SCHEMA))
@@ -51,7 +59,7 @@ async def to_code(config):
         var = cg.new_Pvariable(conf[CONF_ID])
 
         sun_component = await cg.get_variable(conf[CONF_SUN_ID])
-        light_component = await cg.get_variable(conf[CONF_LIGHT_ID])
+        light_component = await await cg.get_variable(conf[CONF_LIGHT_ID])
 
         if CONF_COLD_WHITE_COLOR_TEMPERATURE in conf:
             cg.add(var.set_cold_white_temperature(conf[CONF_COLD_WHITE_COLOR_TEMPERATURE]))
@@ -76,6 +84,17 @@ async def to_code(config):
         if CONF_ADAPTIVE_BRIGHTNESS_SWITCH in conf:
             br_switch = await cg.get_variable(conf[CONF_ADAPTIVE_BRIGHTNESS_SWITCH])
             cg.add(var.set_adaptive_brightness_switch(br_switch))
+
+        if CONF_SLEEP_SWITCH in conf:
+            s_switch = await cg.get_variable(conf[CONF_SLEEP_SWITCH])
+            cg.add(var.set_sleep_switch(s_switch))
+        # --- CHANGED: Passing the slider pointers ---
+        if CONF_SLEEP_BRIGHTNESS in conf:
+            s_bright = await cg.get_variable(conf[CONF_SLEEP_BRIGHTNESS])
+            cg.add(var.set_sleep_brightness(s_bright))
+        if CONF_SLEEP_COLOR_TEMPERATURE in conf:
+            s_color = await cg.get_variable(conf[CONF_SLEEP_COLOR_TEMPERATURE])
+            cg.add(var.set_sleep_color_temperature(s_color))
 
         await cg.register_component(var, conf)
         await switch.register_switch(var, conf)

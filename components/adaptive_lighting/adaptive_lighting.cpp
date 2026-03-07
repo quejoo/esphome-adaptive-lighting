@@ -5,6 +5,8 @@
 #include <utility>
 
 #include "esphome/core/log.h"
+#include "esphome/components/number/number.h"
+#include "esphome/components/switch/switch.h"
 
 static const char *TAG = "adaptive_lighting";
 static constexpr float ELEVATION_ADJUSTMENT_STEP = 0.1f;
@@ -69,6 +71,17 @@ void AdaptiveLightingComponent::setup() {
   }
 }
 
+// x in [0, 1]
+static float smooth_transition(float x, float y_min, float y_max, float speed = 1) {
+  // This influences transition curve and speed
+  constexpr double y1 = 0.00001;
+  constexpr double y2 = 0.999;
+  static float a = (std::atanh(2 * y2 - 1) - std::atanh(2 * y1 - 1));
+  static float b = -(std::atanh(2 * y1 - 1) / a);
+  auto x_adj = std::pow(std::fabs(1 - x * 2), speed);
+  return y_min + (y_max - y_min) * 0.5 * (std::tanh(a * (x_adj - b)) + 1);
+}
+
 void AdaptiveLightingComponent::update() {
   if (light_ == nullptr || sun_ == nullptr) {
     ESP_LOGW(TAG, "Light or Sun component not set!");
@@ -89,17 +102,48 @@ void AdaptiveLightingComponent::update() {
     return;
   }
 
-  // Calculate
+  // Calculate Color Temp
   const time_t sunrise_time = sun_events.sunrise->timestamp;
   const time_t sunset_time = sun_events.sunset->timestamp;
   float mireds = calc_color_temperature(now.timestamp, sunrise_time, sunset_time);
+  bool color_needs_update = (std::fabs(mireds - last_requested_color_temp_) >= 0.1);
 
-  // Compare if < 0.1 difference
-  if (std::fabs(mireds - last_requested_color_temp_) < 0.1) {
+  // --- ADAPTIVE BRIGHTNESS CALCULATION ---
+  bool apply_brightness = true;
+  if (this->adaptive_brightness_switch_ != nullptr && !this->adaptive_brightness_switch_->state) {
+      apply_brightness = false;
+  }
+
+  float new_brightness = light_->remote_values.get_brightness(); // Default to current
+  bool brightness_needs_update = false;
+
+  if (apply_brightness && !this->brightness_manually_controlled_ && 
+      this->min_brightness_ != nullptr && this->max_brightness_ != nullptr) {
+
+      float min_b = this->min_brightness_->state / 100.0f;
+      float max_b = this->max_brightness_->state / 100.0f;
+
+      if (now.timestamp < sunrise_time || now.timestamp > sunset_time) {
+          new_brightness = min_b; // Night time
+      } else {
+          float position = float(now.timestamp - sunrise_time) / float(sunset_time - sunrise_time);
+          // Invert the curve: brightest at noon, dimmest at sunrise/sunset
+          new_brightness = smooth_transition(position, max_b, min_b);
+      }
+      // Round to 2 decimal places to prevent micro-fluctuations
+      new_brightness = std::roundf(new_brightness * 100.0f) / 100.0f;
+
+      if (this->last_brightness_ < 0.0f || std::fabs(new_brightness - this->last_brightness_) >= 0.01f) {
+          brightness_needs_update = true;
+      }
+  }
+
+  if (!color_needs_update && !brightness_needs_update) {
     // This is mandatory to avoid infinite loops when the light is updated
-    ESP_LOGD(TAG, "Skipping update, color temperature is the same as last requested");
+    ESP_LOGD(TAG, "Skipping update, color temperature and brightness are the same as last requested");
     return;
   }
+
   last_requested_color_temp_ = mireds;
 
   // Normalize to avoid warnings
@@ -109,11 +153,16 @@ void AdaptiveLightingComponent::update() {
     mireds = light_max_mireds_;
   }
 
-  ESP_LOGD(TAG, "Setting color temperature %.3f", mireds);
+  ESP_LOGD(TAG, "Setting color temperature %.3f and brightness %.2f", mireds, new_brightness);
   auto call = light_->make_call();
   call.set_color_temperature(mireds);
-  // add brightness to the effect, otherwise it might not get recalculated properly
-  call.set_brightness(light_->remote_values.get_brightness());
+  
+  // Apply calculated brightness
+  call.set_brightness(new_brightness);
+  if (apply_brightness && !this->brightness_manually_controlled_) {
+      this->last_brightness_ = new_brightness;
+  }
+
   if (transition_length_ > 0 && light_->remote_values.is_on()) {
     call.set_transition_length_if_supported(transition_length_);
   }
@@ -143,8 +192,9 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
   // Light is on
   if (current_state) {
     float current_temp = light_->remote_values.get_color_temperature();
+    float current_brightness = light_->remote_values.get_brightness();
 
-    // Check if we have a previous temperature set and if it differs
+    // Check if color temperature changed externally
     if (this->state && last_requested_color_temp_ > 0 && std::fabs(current_temp - last_requested_color_temp_) > 0.1) {
       ESP_LOGI(
           TAG,
@@ -152,11 +202,27 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
           current_temp, last_requested_color_temp_);
       this->write_state(false);
     }
+
+    // Check if brightness changed externally
+    if (this->state && this->last_brightness_ >= 0.0f && std::fabs(current_brightness - this->last_brightness_) > 0.01f) {
+      ESP_LOGI(
+          TAG,
+          "Brightness changed externally (current: %.3f, last requested: %.3f), pausing adaptive brightness",
+          current_brightness, this->last_brightness_);
+      this->brightness_manually_controlled_ = true;
+      this->last_brightness_ = current_brightness; // Update to prevent re-triggering
+    }
   }
   // Light was just turned off
   else if (previous_light_state_ && !this->state && this->restore_mode == switch_::SWITCH_ALWAYS_ON) {
     // Enable adaptive lightning when light turns back on if restore mode is ALWAYS_ON
     this->write_state(true);
+  }
+
+  // Reset manual brightness control when light turns off
+  if (!current_state && previous_light_state_) {
+      this->brightness_manually_controlled_ = false;
+      this->last_brightness_ = -1.0f; // Force recalculation next turn-on
   }
 
   previous_light_state_ = current_state;
@@ -196,17 +262,6 @@ SunEvents AdaptiveLightingComponent::calc_sun_events(const ESPTime &now) {
   }
 
   return {today, sunrise, sunset, sunrise_elevation, sunset_elevation};
-}
-
-// x in [0, 1]
-static float smooth_transition(float x, float y_min, float y_max, float speed = 1) {
-  // This influences transition curve and speed
-  constexpr double y1 = 0.00001;
-  constexpr double y2 = 0.999;
-  static float a = (std::atanh(2 * y2 - 1) - std::atanh(2 * y1 - 1));
-  static float b = -(std::atanh(2 * y1 - 1) / a);
-  auto x_adj = std::pow(std::fabs(1 - x * 2), speed);
-  return y_min + (y_max - y_min) * 0.5 * (std::tanh(a * (x_adj - b)) + 1);
 }
 
 float AdaptiveLightingComponent::calc_color_temperature(const time_t now, const time_t sunrise, const time_t sunset,

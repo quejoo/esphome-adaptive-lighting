@@ -4,6 +4,7 @@
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/sun/sun.h"
 #include "esphome/components/switch/switch.h"
+#include "esphome/components/number/number.h" // Added for Adaptive Brightness
 #include "esphome/core/component.h"
 #include "esphome/core/version.h"
 
@@ -33,6 +34,11 @@ public:
   void set_sunrise_elevation(float sunrise_elevation) { sunrise_elevation_ = sunrise_elevation; }
   void set_sunset_elevation(float sunset_elevation) { sunset_elevation_ = sunset_elevation; }
   void set_speed(float speed) { speed_ = speed; }
+
+  // --- NEW SETTERS FOR ADAPTIVE BRIGHTNESS ---
+  void set_min_brightness(number::Number *min_brightness) { min_brightness_ = min_brightness; }
+  void set_max_brightness(number::Number *max_brightness) { max_brightness_ = max_brightness; }
+  void set_adaptive_brightness_switch(switch_::Switch *adaptive_brightness_switch) { adaptive_brightness_switch_ = adaptive_brightness_switch; }
 
   void update() override;
 
@@ -67,6 +73,15 @@ protected:
 
   bool previous_light_state_{false};
   float last_requested_color_temp_{0};
+
+  // --- NEW VARIABLES FOR ADAPTIVE BRIGHTNESS ---
+  number::Number *min_brightness_{nullptr};
+  number::Number *max_brightness_{nullptr};
+  switch_::Switch *adaptive_brightness_switch_{nullptr};
+  
+  float last_brightness_{-1.0f}; 
+  bool brightness_manually_controlled_{false};
+  bool last_light_state_{false};
 
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 12, 0)
   AdaptiveLightingListenerAdapter *listener_{nullptr};

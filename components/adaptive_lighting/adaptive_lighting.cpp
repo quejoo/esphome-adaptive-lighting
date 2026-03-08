@@ -65,6 +65,35 @@ void AdaptiveLightingComponent::setup() {
       });
     }
   }
+
+  // --- NEW: Attach instant-update listeners to the GUI components ---
+  auto force_update_number = [this](float /* ignored */) {
+    this->force_next_update();
+    this->update();
+  };
+  auto force_update_switch = [this](bool /* ignored */) {
+    this->force_next_update();
+    this->update();
+  };
+
+  if (this->min_brightness_ != nullptr) {
+    this->min_brightness_->add_on_state_callback(force_update_number);
+  }
+  if (this->max_brightness_ != nullptr) {
+    this->max_brightness_->add_on_state_callback(force_update_number);
+  }
+  if (this->sleep_brightness_ != nullptr) {
+    this->sleep_brightness_->add_on_state_callback(force_update_number);
+  }
+  if (this->sleep_color_temperature_ != nullptr) {
+    this->sleep_color_temperature_->add_on_state_callback(force_update_number);
+  }
+  if (this->adaptive_brightness_switch_ != nullptr) {
+    this->adaptive_brightness_switch_->add_on_state_callback(force_update_switch);
+  }
+  if (this->sleep_switch_ != nullptr) {
+    this->sleep_switch_->add_on_state_callback(force_update_switch);
+  }
 }
 
 static float smooth_transition(float x, float y_min, float y_max, float speed = 1) {

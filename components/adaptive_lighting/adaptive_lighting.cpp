@@ -66,12 +66,19 @@ void AdaptiveLightingComponent::setup() {
     }
   }
 
-  // --- NEW: Attach instant-update listeners to the GUI components ---
+  // --- FIX: Instantly clear manual overrides when ANY dashboard setting is changed ---
   auto force_update_number = [this](float /* ignored */) {
+    this->color_manually_controlled_ = false;
+    this->brightness_manually_controlled_ = false;
+    this->last_brightness_ = -1.0f; // Force the brightness math to recalculate
     this->force_next_update();
     this->update();
   };
+  
   auto force_update_switch = [this](bool /* ignored */) {
+    this->color_manually_controlled_ = false;
+    this->brightness_manually_controlled_ = false;
+    this->last_brightness_ = -1.0f;
     this->force_next_update();
     this->update();
   };
@@ -137,7 +144,6 @@ void AdaptiveLightingComponent::update() {
   
   float mireds;
   if (is_sleep_mode) {
-      // --- CHANGED: Read slider in Kelvin, convert to Mireds ---
       if (this->sleep_color_temperature_ != nullptr && this->sleep_color_temperature_->state > 0) {
           mireds = 1000000.0f / this->sleep_color_temperature_->state;
       } else {
@@ -159,7 +165,6 @@ void AdaptiveLightingComponent::update() {
 
   if (apply_brightness && !this->brightness_manually_controlled_) {
       if (is_sleep_mode) {
-          // --- CHANGED: Read slider percentage ---
           new_brightness = (this->sleep_brightness_ != nullptr) ? (this->sleep_brightness_->state / 100.0f) : 0.01f;
       } else if (this->min_brightness_ != nullptr && this->max_brightness_ != nullptr) {
           float min_b = this->min_brightness_->state / 100.0f;
@@ -210,6 +215,11 @@ void AdaptiveLightingComponent::update() {
 
 void AdaptiveLightingComponent::write_state(bool state) {
   if (this->state != state) {
+    // --- FIX: Also clear overrides if you turn the MAIN switch off and on ---
+    this->color_manually_controlled_ = false;
+    this->brightness_manually_controlled_ = false;
+    this->last_brightness_ = -1.0f;
+    
     this->force_next_update();
     this->publish_state(state);
     this->update();

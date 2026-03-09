@@ -257,14 +257,6 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
     this->write_state(true);
   }
 
-  // Clear manual flags when turned off
-  if (!current_state && previous_light_state_) {
-      this->brightness_manually_controlled_ = false;
-      this->color_manually_controlled_ = false;
-      this->last_brightness_ = -1.0f; 
-      this->last_requested_color_temp_ = 0;
-  }
-
   // Update memory state so we don't loop
   previous_light_state_ = current_state;
 

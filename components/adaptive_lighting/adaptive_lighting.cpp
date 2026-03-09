@@ -253,14 +253,14 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
         }
     }
   }
-  else if (previous_light_state_ && !this->state && this->restore_mode == switch_::SWITCH_ALWAYS_ON) {
-    this->write_state(true);
-  }
+
+  // NOTE: The annoying "auto-reset" else-if block that was turning 
+  // your switch back on has been completely deleted from right here!
 
   // Update memory state so we don't loop
   previous_light_state_ = current_state;
 
-  // --- FIX: NO DELAY. Apply math synchronously before the hardware turns on ---
+  // Apply math synchronously before the hardware turns on
   if (just_turned_on && this->state) {
       ESP_LOGI(TAG, "Light turned on, applying adaptive lighting immediately");
       this->force_next_update();

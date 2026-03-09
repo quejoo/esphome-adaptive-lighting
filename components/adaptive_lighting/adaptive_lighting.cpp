@@ -66,11 +66,10 @@ void AdaptiveLightingComponent::setup() {
     }
   }
 
-  // --- FIX: Instantly clear manual overrides when ANY dashboard setting is changed ---
   auto force_update_number = [this](float /* ignored */) {
     this->color_manually_controlled_ = false;
     this->brightness_manually_controlled_ = false;
-    this->last_brightness_ = -1.0f; // Force the brightness math to recalculate
+    this->last_brightness_ = -1.0f;
     this->force_next_update();
     this->update();
   };
@@ -114,12 +113,10 @@ static float smooth_transition(float x, float y_min, float y_max, float speed = 
 
 void AdaptiveLightingComponent::update() {
   if (light_ == nullptr || sun_ == nullptr) {
-    ESP_LOGW(TAG, "Light or Sun component not set!");
     return;
   }
 
   if (!this->state) {
-    ESP_LOGD(TAG, "Update skipped - automatic updates disabled");
     return;
   }
 
@@ -127,7 +124,6 @@ void AdaptiveLightingComponent::update() {
   SunEvents sun_events = calc_sun_events(now);
 
   if (!sun_events.sunrise || !sun_events.sunset) {
-    ESP_LOGW(TAG, "Could not determine sunrise or sunset");
     return;
   }
 
@@ -142,6 +138,14 @@ void AdaptiveLightingComponent::update() {
   const time_t sunrise_time = sun_events.sunrise->timestamp;
   const time_t sunset_time = sun_events.sunset->timestamp;
   
+  // --- NEW: Calculate True Solar Midnight & 24-Hour Cycle ---
+  float solar_noon = sunrise_time + (sunset_time - sunrise_time) / 2.0f;
+  float day_start = solar_noon - 43200.0f; // 12 hours before noon is Solar Midnight
+  
+  float day_position = float(now.timestamp - day_start) / 86400.0f;
+  while (day_position < 0.0f) day_position += 1.0f;
+  while (day_position > 1.0f) day_position -= 1.0f;
+
   float mireds;
   if (is_sleep_mode) {
       if (this->sleep_color_temperature_ != nullptr && this->sleep_color_temperature_->state > 0) {
@@ -150,6 +154,7 @@ void AdaptiveLightingComponent::update() {
           mireds = light_max_mireds_;
       }
   } else {
+      // Color temp strictly follows the sunrise-to-sunset window, flatlining at night
       mireds = calc_color_temperature(now.timestamp, sunrise_time, sunset_time);
   }
 
@@ -170,12 +175,8 @@ void AdaptiveLightingComponent::update() {
           float min_b = this->min_brightness_->state / 100.0f;
           float max_b = this->max_brightness_->state / 100.0f;
 
-          if (now.timestamp < sunrise_time || now.timestamp > sunset_time) {
-              new_brightness = min_b; 
-          } else {
-              float position = float(now.timestamp - sunrise_time) / float(sunset_time - sunrise_time);
-              new_brightness = smooth_transition(position, max_b, min_b);
-          }
+          // Brightness continuously maps the entire 24-hour solar arc (max at noon, min at midnight)
+          new_brightness = smooth_transition(day_position, max_b, min_b);
       }
 
       new_brightness = std::roundf(new_brightness * 100.0f) / 100.0f;
@@ -215,7 +216,6 @@ void AdaptiveLightingComponent::update() {
 
 void AdaptiveLightingComponent::write_state(bool state) {
   if (this->state != state) {
-    // --- FIX: Also clear overrides if you turn the MAIN switch off and on ---
     this->color_manually_controlled_ = false;
     this->brightness_manually_controlled_ = false;
     this->last_brightness_ = -1.0f;

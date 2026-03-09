@@ -253,9 +253,6 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
         }
     }
   }
-  else if (previous_light_state_ && !this->state && this->restore_mode == switch_::SWITCH_ALWAYS_ON) {
-    this->write_state(true);
-  }
 
   // Clear manual flags when turned off
   if (!current_state && previous_light_state_) {

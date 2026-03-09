@@ -231,26 +231,33 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
     return;
 
   bool current_state = light_->remote_values.is_on();
+  
+  // Detect the exact processor cycle the light turns on
+  bool just_turned_on = (current_state && !previous_light_state_);
 
   if (current_state) {
     float current_temp = light_->remote_values.get_color_temperature();
     float current_brightness = light_->remote_values.get_brightness();
 
-    if (this->state && !this->color_manually_controlled_ && last_requested_color_temp_ > 0 && std::fabs(current_temp - last_requested_color_temp_) > 0.1) {
-      ESP_LOGI(TAG, "Color temperature changed externally, pausing adaptive color");
-      this->color_manually_controlled_ = true;
-    }
+    // Ignore manual overrides during the initial turn-on split-second
+    if (!just_turned_on) {
+        if (this->state && !this->color_manually_controlled_ && last_requested_color_temp_ > 0 && std::fabs(current_temp - last_requested_color_temp_) > 0.1) {
+          ESP_LOGI(TAG, "Color temperature changed externally, pausing adaptive color");
+          this->color_manually_controlled_ = true;
+        }
 
-    if (this->state && !this->brightness_manually_controlled_ && this->last_brightness_ >= 0.0f && std::fabs(current_brightness - this->last_brightness_) > 0.01f) {
-      ESP_LOGI(TAG, "Brightness changed externally, pausing adaptive brightness");
-      this->brightness_manually_controlled_ = true;
-      this->last_brightness_ = current_brightness;
+        if (this->state && !this->brightness_manually_controlled_ && this->last_brightness_ >= 0.0f && std::fabs(current_brightness - this->last_brightness_) > 0.01f) {
+          ESP_LOGI(TAG, "Brightness changed externally, pausing adaptive brightness");
+          this->brightness_manually_controlled_ = true;
+          this->last_brightness_ = current_brightness;
+        }
     }
   }
   else if (previous_light_state_ && !this->state && this->restore_mode == switch_::SWITCH_ALWAYS_ON) {
     this->write_state(true);
   }
 
+  // Clear manual flags when turned off
   if (!current_state && previous_light_state_) {
       this->brightness_manually_controlled_ = false;
       this->color_manually_controlled_ = false;
@@ -258,7 +265,15 @@ void AdaptiveLightingComponent::on_light_remote_values_update() {
       this->last_requested_color_temp_ = 0;
   }
 
+  // Update memory state so we don't loop
   previous_light_state_ = current_state;
+
+  // --- FIX: NO DELAY. Apply math synchronously before the hardware turns on ---
+  if (just_turned_on && this->state) {
+      ESP_LOGI(TAG, "Light turned on, applying adaptive lighting immediately");
+      this->force_next_update();
+      this->update(); 
+  }
 }
 
 SunEvents AdaptiveLightingComponent::calc_sun_events(const ESPTime &now) {
